@@ -4,6 +4,7 @@
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "sdkconfig.h"
 #include <cstring>
 
 
@@ -12,8 +13,8 @@
    If you'd rather not, just change the below entries to strings with
    the config you want - ie #define EXAMPLE_WIFI_SSID "mywifissid"
 */
-#define WIFI_SSID      "M13"
-#define WIFI_PASS      "87654321"
+// #define WIFI_SSID      "M13"
+// #define WIFI_PASS      "87654321"
 #define MAXIMUM_RETRY  5
 
 #define WIFI_SCAN_AUTH_MODE_THRESHOLD WIFI_AUTH_WPA2_PSK
@@ -80,8 +81,8 @@ modules::network::WifiStation::WifiStation() {
                                                         &instance_got_ip));
 
     wifi_config_t wifi_config = {};
-    memcpy(wifi_config.sta.ssid,     WIFI_SSID, strlen(WIFI_SSID) + 1);
-    memcpy(wifi_config.sta.password, WIFI_PASS, strlen(WIFI_PASS) + 1);
+    memcpy(wifi_config.sta.ssid,     CONFIG_WIFI_SSID,   strlen(CONFIG_WIFI_SSID) + 1);
+    memcpy(wifi_config.sta.password, CONFIG_WIFI_PASSWD, strlen(CONFIG_WIFI_PASSWD) + 1);
     wifi_config.sta.threshold.authmode = WIFI_SCAN_AUTH_MODE_THRESHOLD;
     wifi_config.sta.sae_pwe_h2e = WIFI_SAE_MODE;
     memcpy(wifi_config.sta.sae_h2e_identifier, H2E_IDENTIFIER, strlen(H2E_IDENTIFIER) + 1);
@@ -111,10 +112,10 @@ auto modules::network::WifiStation::connect() -> void {
      * happened. */
     if (bits & WIFI_CONNECTED_BIT) {
         ESP_LOGI(TAG, "connected to ap SSID:%s password:%s",
-                 WIFI_SSID, WIFI_PASS);
+                 CONFIG_WIFI_SSID, CONFIG_WIFI_PASSWD);
     } else if (bits & WIFI_FAIL_BIT) {
         ESP_LOGI(TAG, "Failed to connect to SSID:%s, password:%s",
-                 WIFI_SSID, WIFI_PASS);
+                 CONFIG_WIFI_SSID, CONFIG_WIFI_PASSWD);
     } else {
         ESP_LOGE(TAG, "UNEXPECTED EVENT");
     }

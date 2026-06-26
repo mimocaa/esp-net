@@ -1,0 +1,23 @@
+menu "Wifi Configuration"
+    config WIFI_SSID
+        string "SSID will be connect automatically"
+        default "M13"
+        help
+            none.
+    config WIFI_PASSWD
+        string "password for login to target wifi"
+        default n
+        help
+            none.
+endmenu
+
+menu "Http Configration"
+    config DATA_BUFFER_SIZE
+        int "Size for http receive buffer"
+        default 2048
+
+    config SERVER_BASE_URL
+        string "The url for backend service"
+        default "http://localhost"
+
+endmenu

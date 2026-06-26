@@ -3,6 +3,7 @@
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "http_requester.hpp"
+#include "sdkconfig.h"
 #include <charconv>
 #include <optional>
 #include <string>
@@ -11,20 +12,18 @@
 
 
 namespace modules::network {
-    #define BufferSize HttpRequester::DATA_BUFFER_SIZE
-
-    bool                                HttpRequester::has_data_mask = false;
-    std::map<const char*, std::string>  HttpRequester::header_buffer;
-    std::vector<char>                   HttpRequester::data_buffer;
-    std::array<char, BufferSize + 1>    HttpRequester::recv_buffer({' '});
-    HttpResponse                        HttpRequester::response_buffer;
+    bool                                            HttpRequester::has_data_mask = false;
+    std::map<const char*, std::string>              HttpRequester::header_buffer;
+    std::vector<char>                               HttpRequester::data_buffer;
+    std::array<char, CONFIG_DATA_BUFFER_SIZE + 1>   HttpRequester::recv_buffer({' '});
+    HttpResponse                                    HttpRequester::response_buffer;
 
     HttpRequester::HttpRequester() {
         auto cfg = esp_http_client_config_t{};
         cfg.url = "http://localhost";
         cfg.event_handler  = HttpRequester::http_event_handler;
         cfg.transport_type = HTTP_TRANSPORT_OVER_TCP;
-        cfg.buffer_size    = DATA_BUFFER_SIZE;
+        cfg.buffer_size    = CONFIG_DATA_BUFFER_SIZE;
         
         auto client = esp_http_client_init(&cfg);
         this->client = std::move(client);
