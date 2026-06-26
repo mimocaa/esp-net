@@ -1,0 +1,22 @@
+{
+  "C_Cpp.intelliSenseEngine": "default",
+  "idf.extensionActivationMode": "always",
+  "clangd.path": "C:\\Espressif\\tools\\esp-clang\\esp-20.1.1_20250829\\esp-clang\\bin\\clangd.exe",
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=**",
+    "--compile-commands-dir=d:\\code\\project\\mimocaa\\esp-net\\build"
+  ],
+  "idf.customExtraVars": {
+    "IDF_TARGET": "esp32c3",
+    "OPENOCD_USB_ADAPTER_LOCATION": "2-1"
+  },
+  "idf.flashType": "JTAG",
+  "idf.currentSetup": "D:\\code\\sdk\\esp32-idf\\.espressif\\.espressif\\.espressif\\v6.0.1\\esp-idf",
+  "idf.portWin": "COM5",
+  "idf.openOcdConfigs": [
+    "board/esp32c3-builtin.cfg"
+  ],
+  "commentTranslate.source": "Bing",
+  "idf.port": "COM4"
+}
