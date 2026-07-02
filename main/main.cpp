@@ -41,5 +41,9 @@ extern "C" void app_main(void) {
      **************/
     test_http();
 
+    // while (1) {
+    
+    // }
+
     return;
 }

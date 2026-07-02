@@ -19,5 +19,17 @@ menu "Http Configration"
     config SERVER_BASE_URL
         string "The url for backend service"
         default "http://localhost"
+endmenu
 
+menu "Spi bridge"
+    config SPI2_MISO
+        int "MISO pin for spi2"
+        default 5
+
+    config SPI2_MOSI
+        int "MOSI pin for spi2"
+        default 6
+    config SPI2_SCLK
+        int "clock pin for spi2"
+        default 7
 endmenu

@@ -9,6 +9,8 @@ set (ESP_REQUIRES
     esp_event 
     esp_netif 
     esp_http_client
+    esp_driver_gpio
+    esp_driver_spi
 )
 
 idf_component_register(SRCS "main.cpp" ${MODULES_SRCS}
