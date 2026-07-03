@@ -1,6 +1,7 @@
 set(MODULES_SRCS 
     "./modules/network/wifi_station.cpp"
     "./modules/network/http_requester.cpp"
+    "./modules/driver/stm_bridge.cpp"
 )
 
 set (ESP_REQUIRES

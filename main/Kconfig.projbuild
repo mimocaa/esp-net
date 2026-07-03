@@ -32,4 +32,13 @@ menu "Spi bridge"
     config SPI2_SCLK
         int "clock pin for spi2"
         default 7
+    config SPI2_CS
+        int "CS/NSS pin for spi2 (slave)"
+        default 10
+    config SPI2_HANDSHAKE
+        int "Handshake/ready output pin (high = a frame is ready)"
+        default 4
+    config SPI_FRAME_SIZE
+        int "Fixed downlink SPI frame size in bytes (multiple of 4)"
+        default 1280
 endmenu

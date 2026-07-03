@@ -4,19 +4,21 @@
 #include "esp_log.h"
 #include "http_requester.hpp"
 #include "sdkconfig.h"
-#include <charconv>
 #include <optional>
 #include <string>
-#include <system_error>
+#include <strings.h>
 #include <vector>
 
 
 namespace modules::network {
     bool                                            HttpRequester::has_data_mask = false;
-    std::map<const char*, std::string>              HttpRequester::header_buffer;
+    std::map<std::string, std::string>              HttpRequester::header_buffer;
     std::vector<char>                               HttpRequester::data_buffer;
     std::array<char, CONFIG_DATA_BUFFER_SIZE + 1>   HttpRequester::recv_buffer({' '});
     HttpResponse                                    HttpRequester::response_buffer;
+    bool                                            HttpRequester::streaming = false;
+    ChunkCallback                                   HttpRequester::on_chunk;
+    std::string                                     HttpRequester::session_id_buffer;
 
     HttpRequester::HttpRequester() {
         auto cfg = esp_http_client_config_t{};
@@ -46,6 +48,10 @@ namespace modules::network {
             has_data_mask = false;
             return res;
         }
+    }
+
+    auto HttpRequester::get_session_id() noexcept -> std::string {
+        return session_id_buffer;
     }
 
     auto HttpRequester::get(const char* url) noexcept -> esp_err_t {
@@ -101,6 +107,43 @@ namespace modules::network {
         return res;
     }
 
+    auto HttpRequester::post_stream(const char* url,
+                                    const std::vector<char>& body,
+                                    ChunkCallback on_chunk_cb) noexcept -> esp_err_t {
+        using method_t = esp_http_client_method_t;
+        static const char* const TAG = "HTTP POST STREAM";
+        auto res = ESP_OK;
+
+        if (this->client == nullptr) {
+            ESP_LOGE(TAG, "Http Client is not init");
+            return ESP_FAIL;
+        }
+
+        streaming = true;
+        on_chunk  = std::move(on_chunk_cb);
+
+        esp_http_client_set_method(this->client, method_t::HTTP_METHOD_POST);
+        esp_http_client_set_url(this->client, url);
+        esp_http_client_set_header(client, "Content-Type", "application/json");
+        esp_http_client_set_post_field(client, body.data(), body.size());
+
+        // esp_http_client_perform drives the event handler; response body chunks
+        // are delivered to on_chunk via HTTP_EVENT_ON_DATA as they arrive.
+        auto err = esp_http_client_perform(client);
+
+        streaming = false;
+        on_chunk  = nullptr;
+
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "HTTP POST STREAM failed: %s", esp_err_to_name(err));
+            res = ESP_FAIL;
+        } else {
+            ESP_LOGI(TAG, "HTTP POST STREAM success");
+        }
+
+        return res;
+    }
+
     auto HttpRequester::http_event_handler(esp_http_client_event_t* event) noexcept -> esp_err_t {
         using eve_t = esp_http_client_event_id_t;
         static const char* TAG = "http client";
@@ -128,25 +171,16 @@ namespace modules::network {
             }
 
             case eve_t::HTTP_EVENT_ON_HEADER: {
-                // ESP_LOGD(TAG, "HTTP EVENT ON HEADER");
                 ESP_LOGD(TAG, "Receive header %s: %s", event->header_key, event->header_value);
                 header_buffer[event->header_key] = event->header_value;
+                if (strcasecmp(event->header_key, "X-Session-Id") == 0) {
+                    session_id_buffer = event->header_value;
+                }
                 break;
             }
 
             case eve_t::HTTP_EVENT_ON_HEADERS_COMPLETE: {
                 ESP_LOGD(TAG, "HTTP EVENT ON HEADER COMPLETE");
-                if (header_buffer.contains("Content-Length")) {
-                    auto data_len_str = header_buffer["Content-Length"];
-                    auto data_size = 0u;
-                    auto [mat_ptr, err] = std::from_chars(data_len_str.data(), data_len_str.end().base(), data_size);
-                    if (mat_ptr == data_len_str.end().base() && err == std::errc{}) {
-                        data_buffer.resize(data_size);
-                    } else {
-                        break;
-                    }
-                }
-
                 break;
             }
 
@@ -161,7 +195,15 @@ namespace modules::network {
                 ESP_LOGD(TAG, "HTTP EVENT ON DATA");
                 auto length = event->data_len;
                 auto* data = static_cast<const char*>(event->data);
-                data_buffer.insert(data_buffer.end(), data, data + length);
+                if (streaming && response_buffer.code == 200) {
+                    // Downlink streaming: forward chunk immediately, no buffering.
+                    if (on_chunk) {
+                        on_chunk(data, length);
+                    }
+                } else {
+                    // Non-streaming, or an error response body: buffer it.
+                    data_buffer.insert(data_buffer.end(), data, data + length);
+                }
                 break;
             }
 
