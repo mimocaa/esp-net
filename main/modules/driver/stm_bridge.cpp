@@ -23,11 +23,11 @@ namespace modules::driver {
     }
 
     StmBridge::StmBridge() {
-        gpio_config_t hs = {};
-        hs.intr_type    = GPIO_INTR_DISABLE;
-        hs.mode         = GPIO_MODE_OUTPUT;
-        hs.pin_bit_mask = 1ULL << CONFIG_SPI2_HANDSHAKE;
-        gpio_config(&hs);
+        gpio_config_t hs_cfg = {};
+        hs_cfg.intr_type    = GPIO_INTR_DISABLE;
+        hs_cfg.mode         = GPIO_MODE_OUTPUT;
+        hs_cfg.pin_bit_mask = 1ULL << CONFIG_SPI2_HANDSHAKE;
+        gpio_config(&hs_cfg);
         gpio_set_level(static_cast<gpio_num_t>(CONFIG_SPI2_HANDSHAKE), 0);
 
         // Pull-ups avoid spurious transactions while the master is idle/disconnected.
@@ -35,23 +35,23 @@ namespace modules::driver {
         gpio_set_pull_mode(static_cast<gpio_num_t>(CONFIG_SPI2_SCLK), GPIO_PULLUP_ONLY);
         gpio_set_pull_mode(static_cast<gpio_num_t>(CONFIG_SPI2_CS), GPIO_PULLUP_ONLY);
 
-        spi_bus_config_t buscfg = {};
-        buscfg.mosi_io_num     = CONFIG_SPI2_MOSI;
-        buscfg.miso_io_num     = CONFIG_SPI2_MISO;
-        buscfg.sclk_io_num     = CONFIG_SPI2_SCLK;
-        buscfg.quadwp_io_num   = -1;
-        buscfg.quadhd_io_num   = -1;
-        buscfg.max_transfer_sz = static_cast<int>(FRAME_SIZE);
+        spi_bus_config_t bus_cfg = {};
+        bus_cfg.mosi_io_num     = CONFIG_SPI2_MOSI;
+        bus_cfg.miso_io_num     = CONFIG_SPI2_MISO;
+        bus_cfg.sclk_io_num     = CONFIG_SPI2_SCLK;
+        bus_cfg.quadwp_io_num   = -1;
+        bus_cfg.quadhd_io_num   = -1;
+        bus_cfg.max_transfer_sz = static_cast<int>(FRAME_SIZE);
 
-        spi_slave_interface_config_t slvcfg = {};
-        slvcfg.mode          = 0;
-        slvcfg.spics_io_num  = CONFIG_SPI2_CS;
-        slvcfg.queue_size    = 3;
-        slvcfg.flags         = 0;
-        slvcfg.post_setup_cb = spi_post_setup_cb;
-        slvcfg.post_trans_cb = spi_post_trans_cb;
+        spi_slave_interface_config_t spi_slv_cfg = {};
+        spi_slv_cfg.mode          = 0;
+        spi_slv_cfg.spics_io_num  = CONFIG_SPI2_CS;
+        spi_slv_cfg.queue_size    = 3;
+        spi_slv_cfg.flags         = 0;
+        spi_slv_cfg.post_setup_cb = spi_post_setup_cb;
+        spi_slv_cfg.post_trans_cb = spi_post_trans_cb;
 
-        auto err = spi_slave_initialize(SLAVE_SPI, &buscfg, &slvcfg, SPI_DMA_CH_AUTO);
+        auto err = spi_slave_initialize(SLAVE_SPI, &bus_cfg, &spi_slv_cfg, SPI_DMA_CH_AUTO);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "spi_slave_initialize failed: %s", esp_err_to_name(err));
             return;
