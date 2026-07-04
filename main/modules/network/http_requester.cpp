@@ -54,6 +54,10 @@ namespace modules::network {
         return session_id_buffer;
     }
 
+    auto HttpRequester::get_status_code() noexcept -> uint32_t {
+        return response_buffer.code;
+    }
+
     auto HttpRequester::get(const char* url) noexcept -> esp_err_t {
         using method_t = esp_http_client_method_t;
         static const char* const TAG = "HTTP GET";
@@ -127,8 +131,8 @@ namespace modules::network {
         esp_http_client_set_header(client, "Content-Type", "application/json");
         esp_http_client_set_post_field(client, body.data(), body.size());
 
-        // esp_http_client_perform drives the event handler; response body chunks
-        // are delivered to on_chunk via HTTP_EVENT_ON_DATA as they arrive.
+        // esp_http_client_perform 驱动事件处理器；响应体数据块会随到达
+        // 通过 HTTP_EVENT_ON_DATA 交给 on_chunk。
         auto err = esp_http_client_perform(client);
 
         streaming = false;
@@ -188,6 +192,9 @@ namespace modules::network {
                 auto code = esp_http_client_get_status_code(event->client);
                 response_buffer.code = code;
                 ESP_LOGD(TAG, "HTTP EVENT ON STATUS CODE %d", code);
+                if (streaming && code != 200) {
+                    ESP_LOGE(TAG, "streaming request got HTTP %d (body not forwarded)", code);
+                }
                 break;
             }
 
@@ -196,12 +203,12 @@ namespace modules::network {
                 auto length = event->data_len;
                 auto* data = static_cast<const char*>(event->data);
                 if (streaming && response_buffer.code == 200) {
-                    // Downlink streaming: forward chunk immediately, no buffering.
+                    // 下行流式：立即转发数据块，不做缓冲。
                     if (on_chunk) {
                         on_chunk(data, length);
                     }
                 } else {
-                    // Non-streaming, or an error response body: buffer it.
+                    // 非流式，或错误响应体：缓冲起来。
                     data_buffer.insert(data_buffer.end(), data, data + length);
                 }
                 break;

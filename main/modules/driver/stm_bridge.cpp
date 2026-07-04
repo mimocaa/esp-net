@@ -11,15 +11,26 @@
 namespace modules::driver {
     static const char* const TAG = "StmBridge";
 
-    // Called (in ISR context) once a transaction is loaded and the slave is ready
-    // for the master to clock data: raise the handshake line.
+#ifdef CONFIG_SPI2_HANDSHAKE_ACTIVE_HIGH
+    static constexpr int HS_ASSERTED   = 1;
+    static constexpr int HS_DEASSERTED = 0;
+#else
+    static constexpr int HS_ASSERTED   = 0;
+    static constexpr int HS_DEASSERTED = 1;
+#endif
+
+    /**
+     * @brief 事务已装载、从机准备好被主机读取时的回调（在 ISR 上下文中调用）：拉有效握手线。
+     */
     static void IRAM_ATTR spi_post_setup_cb(spi_slave_transaction_t*) {
-        gpio_set_level(static_cast<gpio_num_t>(CONFIG_SPI2_HANDSHAKE), 1);
+        gpio_set_level(static_cast<gpio_num_t>(CONFIG_SPI2_HANDSHAKE), HS_ASSERTED);
     }
 
-    // Called (in ISR context) after the master finished the transaction: lower it.
+    /**
+     * @brief 主机完成事务后的回调（在 ISR 上下文中调用）：拉无效握手线。
+     */
     static void IRAM_ATTR spi_post_trans_cb(spi_slave_transaction_t*) {
-        gpio_set_level(static_cast<gpio_num_t>(CONFIG_SPI2_HANDSHAKE), 0);
+        gpio_set_level(static_cast<gpio_num_t>(CONFIG_SPI2_HANDSHAKE), HS_DEASSERTED);
     }
 
     StmBridge::StmBridge() {
@@ -28,9 +39,9 @@ namespace modules::driver {
         hs_cfg.mode         = GPIO_MODE_OUTPUT;
         hs_cfg.pin_bit_mask = 1ULL << CONFIG_SPI2_HANDSHAKE;
         gpio_config(&hs_cfg);
-        gpio_set_level(static_cast<gpio_num_t>(CONFIG_SPI2_HANDSHAKE), 0);
+        gpio_set_level(static_cast<gpio_num_t>(CONFIG_SPI2_HANDSHAKE), HS_DEASSERTED);
 
-        // Pull-ups avoid spurious transactions while the master is idle/disconnected.
+        // 上拉可避免主机空闲/断开时产生杂散事务。
         gpio_set_pull_mode(static_cast<gpio_num_t>(CONFIG_SPI2_MOSI), GPIO_PULLUP_ONLY);
         gpio_set_pull_mode(static_cast<gpio_num_t>(CONFIG_SPI2_SCLK), GPIO_PULLUP_ONLY);
         gpio_set_pull_mode(static_cast<gpio_num_t>(CONFIG_SPI2_CS), GPIO_PULLUP_ONLY);
@@ -109,7 +120,7 @@ namespace modules::driver {
         static_cast<StmBridge*>(arg)->feeder_loop();
     }
 
-    auto StmBridge::feeder_loop() -> void {
+    auto StmBridge::assemble_frame() -> void {
         size_t filled = 0;
 
         while (1) {
@@ -118,28 +129,54 @@ namespace modules::driver {
                 pdMS_TO_TICKS(50));
             filled += got;
 
-            const bool full  = (filled == FRAME_SIZE);
-            const bool flush = this->flush_requested.load() && got == 0 && filled > 0;
-
-            if (full || flush) {
-                if (flush) {
-                    std::memset(this->frame + filled, 0, FRAME_SIZE - filled);
-                }
-
-                spi_slave_transaction_t trans = {};
-                trans.length    = FRAME_SIZE * 8; // bits
-                trans.tx_buffer = this->frame;
-                trans.rx_buffer = nullptr;
-
-                auto err = spi_slave_transmit(SLAVE_SPI, &trans, portMAX_DELAY);
-                if (err != ESP_OK) {
-                    ESP_LOGE(TAG, "spi_slave_transmit failed: %s", esp_err_to_name(err));
-                }
-                filled = 0;
+            if (filled == FRAME_SIZE) {
+                return;
             }
 
             if (this->flush_requested.load() && got == 0) {
                 this->flush_requested.store(false);
+                if (filled > 0) {
+                    std::memset(this->frame + filled, 0, FRAME_SIZE - filled);
+                    return;
+                }
+                // 缓冲区为空：继续等待下一段音频。
+            }
+        }
+    }
+
+    auto StmBridge::feeder_loop() -> void {
+        const TickType_t tx_timeout = pdMS_TO_TICKS(CONFIG_SPI_SLAVE_TX_TIMEOUT_MS);
+        uint32_t frames    = 0;
+        uint32_t underruns = 0;
+
+        while (1) {
+            assemble_frame();
+
+            spi_slave_transaction_t trans = {};
+            trans.length    = FRAME_SIZE * 8; // 单位为比特
+            trans.tx_buffer = this->frame;
+            trans.rx_buffer = nullptr;
+
+            auto qerr = spi_slave_queue_trans(SLAVE_SPI, &trans, portMAX_DELAY);
+            if (qerr != ESP_OK) {
+                ESP_LOGE(TAG, "spi_slave_queue_trans failed: %s", esp_err_to_name(qerr));
+                continue;
+            }
+
+            // 等待主机把该帧时钟读走。超时后事务仍在驱动中挂起，因此继续轮询
+            // 同一个结果，而不是再排队新事务（避免死锁和事务泄漏）。
+            spi_slave_transaction_t* done = nullptr;
+            while (spi_slave_get_trans_result(SLAVE_SPI, &done, tx_timeout) != ESP_OK) {
+                ++underruns;
+                ESP_LOGW(TAG, "SPI tx timeout: master not reading (underruns=%lu)",
+                         static_cast<unsigned long>(underruns));
+            }
+
+            ++frames;
+            if ((frames % 100) == 0) {
+                ESP_LOGI(TAG, "frames=%lu underruns=%lu",
+                         static_cast<unsigned long>(frames),
+                         static_cast<unsigned long>(underruns));
             }
         }
     }

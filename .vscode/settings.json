@@ -17,6 +17,6 @@
   "idf.openOcdConfigs": [
     "board/esp32c3-builtin.cfg"
   ],
-  "commentTranslate.source": "Bing",
+  "commentTranslate.source": "TranSmart",
   "idf.port": "COM4"
 }

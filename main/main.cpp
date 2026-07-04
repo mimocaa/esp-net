@@ -47,12 +47,13 @@ extern "C" void chat_once(void) {
                 reinterpret_cast<const uint8_t*>(data), static_cast<size_t>(len));
         });
 
-    StmBridge::instance().flush();
-
-    if (err == ESP_OK) {
+    auto status = HttpRequester::get_status_code();
+    if (err == ESP_OK && status == 200) {
+        StmBridge::instance().flush();
         ESP_LOGI(TAG, "chat done, session=%s", HttpRequester::get_session_id().c_str());
     } else {
-        ESP_LOGE(TAG, "chat request failed");
+        ESP_LOGE(TAG, "chat request failed (err=%d status=%lu)",
+                 err, static_cast<unsigned long>(status));
     }
 }
 

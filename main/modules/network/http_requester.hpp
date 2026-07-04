@@ -19,8 +19,12 @@ namespace modules::network {
         std::string body;
     };
 
-    /// Invoked for every response-body chunk as it arrives during a streaming
-    /// request. `data` is only valid for the duration of the call.
+    /**
+     * @brief 流式请求期间，每个响应体数据块到达时都会被调用的回调类型。
+     *
+     * @param data 数据块指针，仅在本次调用期间有效。
+     * @param len  数据块字节数。
+     */
     using ChunkCallback = std::function<void(const char* data, int len)>;
 
     class HttpRequester : public Singleton<HttpRequester> {
@@ -57,12 +61,15 @@ namespace modules::network {
         static auto get_data() noexcept -> std::optional<HttpResponse>;
         /** @brief 返回最近一次响应头中捕获的会话 ID（可能为空） */
         static auto get_session_id() noexcept -> std::string;
+        /** @brief 返回最近一次响应的 HTTP 状态码（0 表示未知） */
+        static auto get_status_code() noexcept -> uint32_t;
 
         auto get (const char* url) noexcept -> esp_err_t;
         auto post(const char* url, const std::vector<char>& data) noexcept -> esp_err_t;
 
         /**
-         * POST `body` 并把响应体逐块交给 `on_chunk`（不整段缓冲），
+         * @brief POST body 并把响应体逐块交给 on_chunk（不整段缓冲）。
+         *
          * 用于下行音频流式接收后经 SPI 转发。调用在响应结束后返回。
          */
         auto post_stream(const char* url,

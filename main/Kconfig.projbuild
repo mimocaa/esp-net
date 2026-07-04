@@ -41,4 +41,13 @@ menu "Spi bridge"
     config SPI_FRAME_SIZE
         int "Fixed downlink SPI frame size in bytes (multiple of 4)"
         default 1280
+    config SPI_RING_BYTES
+        int "Downlink StreamBuffer capacity in bytes"
+        default 16384
+    config SPI2_HANDSHAKE_ACTIVE_HIGH
+        bool "Handshake asserted level is HIGH (n = active LOW)"
+        default y
+    config SPI_SLAVE_TX_TIMEOUT_MS
+        int "Timeout (ms) waiting for the SPI master to clock a frame"
+        default 2000
 endmenu

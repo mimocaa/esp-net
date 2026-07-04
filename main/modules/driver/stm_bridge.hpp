@@ -13,9 +13,12 @@
 #include <cstdint>
 
 namespace modules::driver {
-    /// SPI2 **slave** link to the STM32 (STM is master). Downlink audio
-    /// (raw PCM16LE 24kHz mono) received over HTTP is buffered and clocked out
-    /// to the STM32 in fixed-size frames; a handshake GPIO signals "frame ready".
+    /**
+     * @brief 连接 STM32 的 SPI2 从机（STM 为主机）。
+     *
+     * 通过 HTTP 收到的下行音频（裸 PCM16LE 24kHz 单声道）会被缓冲，并以定长帧
+     * 的形式时钟输出给 STM32；一根握手 GPIO 用于告知“帧已就绪”。
+     */
     class StmBridge : public Singleton<StmBridge> {
         friend Singleton<StmBridge>;
         StmBridge();
@@ -27,21 +30,32 @@ namespace modules::driver {
         std::atomic<bool>    flush_requested    {false};
         bool                 initialized        {false};
 
-        // Configuration
+        // 配置项
         static constexpr auto   SLAVE_SPI  = SPI2_HOST;
         static constexpr size_t FRAME_SIZE = CONFIG_SPI_FRAME_SIZE;
-        static constexpr size_t RING_BYTES = 16 * 1024;
+        static constexpr size_t RING_BYTES = CONFIG_SPI_RING_BYTES;
 
         static auto feeder_entry(void* arg) -> void;
         auto feeder_loop() -> void;
+        /**
+         * @brief 阻塞直到在 frame 中组装出一个完整的 FRAME_SIZE 帧。
+         *
+         * 待 flush 时对不足一帧的尾部补零。
+         */
+        auto assemble_frame() -> void;
 
     public:
-        /// Enqueue `len` bytes of downlink PCM for transmission to the STM32.
-        /// Called from the HTTP streaming callback; applies backpressure when the
-        /// internal buffer is full. Returns the number of bytes accepted.
+        /**
+         * @brief 将 len 字节的下行 PCM 入队，等待发送给 STM32。
+         *
+         * 由 HTTP 流式回调调用；内部缓冲区满时会产生背压。
+         * @return 实际接受的字节数。
+         */
         auto write(const uint8_t* data, size_t len) noexcept -> size_t;
 
-        /// Flush any buffered remainder as a final (zero-padded) frame.
+        /**
+         * @brief 将缓冲区中剩余的不足一帧数据补零后作为最后一帧发出。
+         */
         auto flush() noexcept -> void;
     }; // class StmBridge
 } // namespace modules::driver
