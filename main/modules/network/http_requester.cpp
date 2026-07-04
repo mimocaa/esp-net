@@ -4,6 +4,7 @@
 #include "esp_log.h"
 #include "http_requester.hpp"
 #include "sdkconfig.h"
+#include <cstdio>
 #include <optional>
 #include <string>
 #include <strings.h>
@@ -16,9 +17,8 @@ namespace modules::network {
     std::vector<char>                               HttpRequester::data_buffer;
     std::array<char, CONFIG_DATA_BUFFER_SIZE + 1>   HttpRequester::recv_buffer({' '});
     HttpResponse                                    HttpRequester::response_buffer;
-    bool                                            HttpRequester::streaming = false;
-    ChunkCallback                                   HttpRequester::on_chunk;
     std::string                                     HttpRequester::session_id_buffer;
+    std::string                                     HttpRequester::emotion_buffer;
 
     HttpRequester::HttpRequester() {
         auto cfg = esp_http_client_config_t{};
@@ -26,6 +26,8 @@ namespace modules::network {
         cfg.event_handler  = HttpRequester::http_event_handler;
         cfg.transport_type = HTTP_TRANSPORT_OVER_TCP;
         cfg.buffer_size    = CONFIG_DATA_BUFFER_SIZE;
+        // 有限超时：连接/读写超时后 open/read 返回错误，而不是无限轮询重试。
+        cfg.timeout_ms     = CONFIG_HTTP_TIMEOUT_MS;
         
         auto client = esp_http_client_init(&cfg);
         this->client = std::move(client);
@@ -52,6 +54,10 @@ namespace modules::network {
 
     auto HttpRequester::get_session_id() noexcept -> std::string {
         return session_id_buffer;
+    }
+
+    auto HttpRequester::get_emotion() noexcept -> std::string {
+        return emotion_buffer;
     }
 
     auto HttpRequester::get_status_code() noexcept -> uint32_t {
@@ -111,41 +117,123 @@ namespace modules::network {
         return res;
     }
 
+    // 把 buffer 全部写出（重试短写）；出错返回 -1。
+    static auto write_all(esp_http_client_handle_t client, const char* p, int n) -> int {
+        int off = 0;
+        while (off < n) {
+            int w = esp_http_client_write(client, p + off, n - off);
+            if (w < 0) {
+                return -1;
+            }
+            off += w;
+        }
+        return 0;
+    }
+
     auto HttpRequester::post_stream(const char* url,
-                                    const std::vector<char>& body,
-                                    ChunkCallback on_chunk_cb) noexcept -> esp_err_t {
+                                    const char* sid,
+                                    int content_length,
+                                    UploadCallback produce,
+                                    UploadDoneCallback on_upload_done,
+                                    ChunkCallback on_chunk) noexcept -> esp_err_t {
         using method_t = esp_http_client_method_t;
         static const char* const TAG = "HTTP POST STREAM";
-        auto res = ESP_OK;
 
         if (this->client == nullptr) {
             ESP_LOGE(TAG, "Http Client is not init");
             return ESP_FAIL;
         }
 
-        streaming = true;
-        on_chunk  = std::move(on_chunk_cb);
+        const bool chunked = (content_length < 0);
 
         esp_http_client_set_method(this->client, method_t::HTTP_METHOD_POST);
         esp_http_client_set_url(this->client, url);
-        esp_http_client_set_header(client, "Content-Type", "application/json");
-        esp_http_client_set_post_field(client, body.data(), body.size());
-
-        // esp_http_client_perform 驱动事件处理器；响应体数据块会随到达
-        // 通过 HTTP_EVENT_ON_DATA 交给 on_chunk。
-        auto err = esp_http_client_perform(client);
-
-        streaming = false;
-        on_chunk  = nullptr;
-
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "HTTP POST STREAM failed: %s", esp_err_to_name(err));
-            res = ESP_FAIL;
-        } else {
-            ESP_LOGI(TAG, "HTTP POST STREAM success");
+        esp_http_client_set_header(client, "Content-Type", "application/octet-stream");
+        if (sid != nullptr) {
+            esp_http_client_set_header(client, "X-Session-Id", sid);
         }
 
-        return res;
+        // content_length>=0 设置 Content-Length；<0 用 open(-1) 启用 chunked。
+        auto err = esp_http_client_open(client, content_length);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "open failed: %s", esp_err_to_name(err));
+            return ESP_FAIL;
+        }
+
+        // 上行：循环调用生产者取数据并写出，直到返回 0。
+        // 静态缓冲避免占用调用任务栈（post_stream 非重入，单例客户端）。
+        static char up_buf[CONFIG_SPI_FRAME_SIZE];
+        int  produced = 0;
+        size_t total_up = 0;
+        while (produce && (produced = produce(up_buf, sizeof(up_buf))) > 0) {
+            if (chunked) {
+                // RFC7230 分块帧：<hex len>\r\n <data> \r\n
+                char hdr[16];
+                int hn = snprintf(hdr, sizeof(hdr), "%X\r\n", produced);
+                if (write_all(client, hdr, hn) < 0 ||
+                    write_all(client, up_buf, produced) < 0 ||
+                    write_all(client, "\r\n", 2) < 0) {
+                    ESP_LOGE(TAG, "chunk write failed after %u bytes", (unsigned)total_up);
+                    esp_http_client_close(client);
+                    return ESP_FAIL;
+                }
+            } else {
+                if (write_all(client, up_buf, produced) < 0) {
+                    ESP_LOGE(TAG, "write failed after %u bytes", (unsigned)total_up);
+                    esp_http_client_close(client);
+                    return ESP_FAIL;
+                }
+            }
+            total_up += produced;
+        }
+        if (chunked) {
+            // 结束分块传输。
+            if (write_all(client, "0\r\n\r\n", 5) < 0) {
+                ESP_LOGE(TAG, "chunk terminator write failed");
+                esp_http_client_close(client);
+                return ESP_FAIL;
+            }
+        }
+        ESP_LOGI(TAG, "uplink sent %u bytes", (unsigned)total_up);
+
+        // 发送结束、读取响应头（会触发 header 事件以捕获 X-Session-Id / X-Emotion）。
+        auto content_len = esp_http_client_fetch_headers(client);
+        (void)content_len;
+        auto status = esp_http_client_get_status_code(client);
+        response_buffer.code = status;
+
+        if (status != 200) {
+            ESP_LOGE(TAG, "streaming request got HTTP %d (body not forwarded)", status);
+            esp_http_client_close(client);
+            return ESP_FAIL;
+        }
+
+        if (on_upload_done) {
+            on_upload_done();
+        }
+
+        // 下行：逐块读取响应体裸 PCM，交给 on_chunk（供 SPI 转发）。
+        size_t total_down = 0;
+        while (!esp_http_client_is_complete_data_received(client)) {
+            int r = esp_http_client_read(client, recv_buffer.data(),
+                                         CONFIG_DATA_BUFFER_SIZE);
+            if (r < 0) {
+                ESP_LOGE(TAG, "read failed after %u bytes", (unsigned)total_down);
+                esp_http_client_close(client);
+                return ESP_FAIL;
+            }
+            if (r == 0) {
+                break;
+            }
+            if (on_chunk) {
+                on_chunk(recv_buffer.data(), r);
+            }
+            total_down += r;
+        }
+        ESP_LOGI(TAG, "downlink recv %u bytes", (unsigned)total_down);
+
+        esp_http_client_close(client);
+        return ESP_OK;
     }
 
     auto HttpRequester::http_event_handler(esp_http_client_event_t* event) noexcept -> esp_err_t {
@@ -179,6 +267,8 @@ namespace modules::network {
                 header_buffer[event->header_key] = event->header_value;
                 if (strcasecmp(event->header_key, "X-Session-Id") == 0) {
                     session_id_buffer = event->header_value;
+                } else if (strcasecmp(event->header_key, "X-Emotion") == 0) {
+                    emotion_buffer = event->header_value;
                 }
                 break;
             }
@@ -192,25 +282,15 @@ namespace modules::network {
                 auto code = esp_http_client_get_status_code(event->client);
                 response_buffer.code = code;
                 ESP_LOGD(TAG, "HTTP EVENT ON STATUS CODE %d", code);
-                if (streaming && code != 200) {
-                    ESP_LOGE(TAG, "streaming request got HTTP %d (body not forwarded)", code);
-                }
                 break;
             }
 
             case eve_t::HTTP_EVENT_ON_DATA: {
+                // 仅用于 perform 驱动的 get/post；post_stream 走手动 read。
                 ESP_LOGD(TAG, "HTTP EVENT ON DATA");
                 auto length = event->data_len;
                 auto* data = static_cast<const char*>(event->data);
-                if (streaming && response_buffer.code == 200) {
-                    // 下行流式：立即转发数据块，不做缓冲。
-                    if (on_chunk) {
-                        on_chunk(data, length);
-                    }
-                } else {
-                    // 非流式，或错误响应体：缓冲起来。
-                    data_buffer.insert(data_buffer.end(), data, data + length);
-                }
+                data_buffer.insert(data_buffer.end(), data, data + length);
                 break;
             }
 

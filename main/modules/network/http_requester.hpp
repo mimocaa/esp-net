@@ -27,6 +27,17 @@ namespace modules::network {
      */
     using ChunkCallback = std::function<void(const char* data, int len)>;
 
+    /**
+     * @brief 上行分块上传的生产者回调类型。
+     *
+     * 每次调用应向 buf 填入至多 max_len 字节的待上传数据。
+     * @return 实际填入的字节数；返回 0 表示上传结束。
+     */
+    using UploadCallback = std::function<int(char* buf, int max_len)>;
+
+    /** @brief 上行结束、响应头就绪(200)后、开始读响应体前的回调。 */
+    using UploadDoneCallback = std::function<void()>;
+
     class HttpRequester : public Singleton<HttpRequester> {
         friend Singleton<HttpRequester>;
         HttpRequester();
@@ -46,12 +57,10 @@ namespace modules::network {
         static std::array<char, CONFIG_DATA_BUFFER_SIZE + 1>    recv_buffer;
         static HttpResponse                                     response_buffer;
 
-        /** @brief 流式接收状态：为 true 时逐块回调，不整段缓冲 */
-        static bool                                             streaming;
-        /** @brief 流式接收时每个响应数据块的回调 */
-        static ChunkCallback                                    on_chunk;
         /** @brief 从响应头 X-Session-Id 捕获的会话 ID，跨请求保留 */
         static std::string                                      session_id_buffer;
+        /** @brief 从响应头 X-Emotion 捕获的情绪标记 */
+        static std::string                                      emotion_buffer;
 
     public:
         inline static  auto has_data() -> bool {
@@ -61,6 +70,8 @@ namespace modules::network {
         static auto get_data() noexcept -> std::optional<HttpResponse>;
         /** @brief 返回最近一次响应头中捕获的会话 ID（可能为空） */
         static auto get_session_id() noexcept -> std::string;
+        /** @brief 返回最近一次响应头中捕获的情绪标记（可能为空） */
+        static auto get_emotion() noexcept -> std::string;
         /** @brief 返回最近一次响应的 HTTP 状态码（0 表示未知） */
         static auto get_status_code() noexcept -> uint32_t;
 
@@ -68,12 +79,25 @@ namespace modules::network {
         auto post(const char* url, const std::vector<char>& data) noexcept -> esp_err_t;
 
         /**
-         * @brief POST body 并把响应体逐块交给 on_chunk（不整段缓冲）。
+         * @brief 上传请求体、并把响应体逐块交给 on_chunk 的双向流式请求。
          *
-         * 用于下行音频流式接收后经 SPI 转发。调用在响应结束后返回。
+         * 上行：`content_length >= 0` 用 Content-Length 写裸字节；`content_length < 0`
+         * 用 chunked（长度未知，内部逐块加 RFC7230 分块帧）。
+         * 下行：读取响应体并逐块交给 on_chunk（供 SPI 转发），不整段缓冲。
+         * 调用在整个请求-响应结束后返回。
+         *
+         * @param url            目标 URL
+         * @param sid            请求头 X-Session-Id 的值（可为空串）
+         * @param content_length 上行总字节数；<0 表示未知(用 chunked)
+         * @param produce        上行数据生产者回调（返回 0 结束）
+         * @param on_upload_done 上行结束、状态 200、开始读响应前回调（可为空）
+         * @param on_chunk       下行数据块回调
          */
         auto post_stream(const char* url,
-                         const std::vector<char>& body,
+                         const char* sid,
+                         int content_length,
+                         UploadCallback produce,
+                         UploadDoneCallback on_upload_done,
                          ChunkCallback on_chunk) noexcept -> esp_err_t;
 
     private:

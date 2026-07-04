@@ -19,6 +19,18 @@ menu "Http Configration"
     config SERVER_BASE_URL
         string "The url for backend service"
         default "http://localhost"
+
+    config HTTP_TIMEOUT_MS
+        int "HTTP network timeout in ms (connect / read / write)"
+        default 8000
+
+    config HTTP_MAX_RETRIES
+        int "Max attempts for one /chat request"
+        default 3
+
+    config HTTP_RETRY_DELAY_MS
+        int "Delay in ms between /chat retries"
+        default 2000
 endmenu
 
 menu "Spi bridge"
@@ -50,4 +62,26 @@ menu "Spi bridge"
     config SPI_SLAVE_TX_TIMEOUT_MS
         int "Timeout (ms) waiting for the SPI master to clock a frame"
         default 2000
+endmenu
+
+menu "Audio / VAD"
+    config MIC_RING_BYTES
+        int "Mic uplink StreamBuffer capacity in bytes"
+        default 16384
+
+    config VAD_START_RMS
+        int "VAD speech-start RMS threshold"
+        default 500
+
+    config VAD_END_RMS
+        int "VAD speech-end RMS threshold"
+        default 300
+
+    config VAD_HANGOVER_MS
+        int "Silence duration (ms) before VAD declares speech end"
+        default 600
+
+    config VAD_PREROLL_MS
+        int "Audio kept before speech start (ms) to avoid clipping onset"
+        default 300
 endmenu
