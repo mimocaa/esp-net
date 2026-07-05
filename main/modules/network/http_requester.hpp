@@ -89,6 +89,7 @@ namespace modules::network {
          * @param url            目标 URL
          * @param sid            请求头 X-Session-Id 的值（可为空串）
          * @param content_length 上行总字节数；<0 表示未知(用 chunked)
+         * @param emotion_code   STM 宠物情绪协议码(0–6)，<0 表示不传
          * @param produce        上行数据生产者回调（返回 0 结束）
          * @param on_upload_done 上行结束、状态 200、开始读响应前回调（可为空）
          * @param on_chunk       下行数据块回调
@@ -96,6 +97,7 @@ namespace modules::network {
         auto post_stream(const char* url,
                          const char* sid,
                          int content_length,
+                         int emotion_code,
                          UploadCallback produce,
                          UploadDoneCallback on_upload_done,
                          ChunkCallback on_chunk) noexcept -> esp_err_t;

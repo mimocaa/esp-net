@@ -130,9 +130,16 @@ namespace modules::network {
         return 0;
     }
 
+    // 协议情绪码(0-6) → 后端 ASCII
+    static const char* emotion_map[] = {
+        "normal", "happy", "alert", "angry", "curious", "shy", "sad"
+    };
+    static constexpr int EMOTION_MAP_SIZE = 7;
+
     auto HttpRequester::post_stream(const char* url,
                                     const char* sid,
                                     int content_length,
+                                    int emotion_code,
                                     UploadCallback produce,
                                     UploadDoneCallback on_upload_done,
                                     ChunkCallback on_chunk) noexcept -> esp_err_t {
@@ -151,6 +158,9 @@ namespace modules::network {
         esp_http_client_set_header(client, "Content-Type", "application/octet-stream");
         if (sid != nullptr) {
             esp_http_client_set_header(client, "X-Session-Id", sid);
+        }
+        if (emotion_code >= 0 && emotion_code < EMOTION_MAP_SIZE) {
+            esp_http_client_set_header(client, "X-Emotion", emotion_map[emotion_code]);
         }
 
         // content_length>=0 设置 Content-Length；<0 用 open(-1) 启用 chunked。

@@ -45,6 +45,7 @@ static void chat_turn(modules::audio::Vad& vad) {
 
     vad.reset();
     stm.set_phase(Phase::Record);
+    stm.resume(); // 通知 feeder 期待下一帧为控制帧（STM 使能时发送）
 
     // ---- Record：等待说话开始，维护 pre-roll 环 ----
     std::vector<uint8_t> preroll;
@@ -102,8 +103,10 @@ static void chat_turn(modules::audio::Vad& vad) {
     std::string url = std::string(CONFIG_SERVER_BASE_URL) + "/chat";
     std::string sid = HttpRequester::get_session_id();
 
-    auto err = http.post_stream(url.c_str(), sid.c_str(), -1, produce,
-                                on_upload_done, on_chunk);
+    int emotion_code = stm.get_stm_emotion();
+
+    auto err = http.post_stream(url.c_str(), sid.c_str(), -1, emotion_code,
+                                produce, on_upload_done, on_chunk);
     auto status = HttpRequester::get_status_code();
 
     if (err == ESP_OK && status == 200) {

@@ -28,13 +28,17 @@ namespace modules::driver {
         StmBridge();
         ~StmBridge();
 
-        StreamBufferHandle_t tx_stream   {nullptr}; // 下行播放 ESP->STM
-        StreamBufferHandle_t rx_stream   {nullptr}; // 上行麦克风 STM->ESP
-        TaskHandle_t         feeder_task {nullptr};
-        uint8_t*             tx_frame    {nullptr};
-        uint8_t*             rx_frame    {nullptr};
-        std::atomic<Phase>   phase       {Phase::Record};
-        bool                 initialized {false};
+        StreamBufferHandle_t tx_stream         {nullptr}; // 下行播放 ESP->STM
+        StreamBufferHandle_t rx_stream         {nullptr}; // 上行麦克风 STM->ESP
+        TaskHandle_t         feeder_task       {nullptr};
+        uint8_t*             tx_frame          {nullptr};
+        uint8_t*             rx_frame          {nullptr};
+        std::atomic<Phase>   phase             {Phase::Record};
+        bool                 initialized       {false};
+
+        // 控制帧检测与情绪码存储
+        std::atomic<bool>    expecting_control {false};
+        int                  stm_emotion       {0};
 
         // 配置项
         static constexpr auto   SLAVE_SPI     = SPI2_HOST;
@@ -51,6 +55,16 @@ namespace modules::driver {
         /** @brief 设置相位并驱动握手线（Record=拉低 / Play=拉高）。 */
         auto set_phase(Phase p) noexcept -> void;
         auto get_phase() const noexcept -> Phase { return phase.load(); }
+
+        /**
+         * @brief 恢复记录（feed stm_saver 恢复排队事务并期望随后收到控制帧）。
+         */
+        auto resume() noexcept -> void;
+
+        /**
+         * @brief 获取最近一次控制帧中的 STM 情绪码（0–6，见协议文件）。
+         */
+        auto get_stm_emotion() const noexcept -> int { return stm_emotion; }
 
         /**
          * @brief 下行：将播放 PCM 入队（Play 相位由 feeder 发往 STM）。

@@ -105,6 +105,10 @@ namespace modules::driver {
         }
     }
 
+    auto StmBridge::resume() noexcept -> void {
+        this->expecting_control.store(true);
+    }
+
     auto StmBridge::set_phase(Phase p) noexcept -> void {
         this->phase.store(p);
         gpio_set_level(static_cast<gpio_num_t>(CONFIG_SPI2_HANDSHAKE),
@@ -154,9 +158,17 @@ namespace modules::driver {
                 ESP_LOGD(TAG, "SPI wait timeout (master idle)");
             }
 
-            // Record 相位：把收到的麦克风帧压入 rx_stream（满则丢弃）。
+            // Record 相位：处理收到的麦克风帧。
             if (p == Phase::Record) {
-                xStreamBufferSend(this->rx_stream, this->rx_frame, FRAME_SIZE, 0);
+                if (this->expecting_control.load()) {
+                    // 使能后的首帧是控制帧：提取情绪码（字节1），帧不进 rx_stream。
+                    if (this->rx_frame[0] == 0x01) {
+                        this->stm_emotion = static_cast<int>(this->rx_frame[1]);
+                    }
+                    this->expecting_control.store(false);
+                } else {
+                    xStreamBufferSend(this->rx_stream, this->rx_frame, FRAME_SIZE, 0);
+                }
             }
         }
     }
